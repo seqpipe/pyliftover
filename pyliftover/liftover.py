@@ -13,7 +13,11 @@ import gzip
 from .chainfile import open_liftover_chain_file, LiftOverChainFile
 
 class LiftOver:
-    def __init__(self, from_db, to_db=None, search_dir='.', cache_dir=os.path.expanduser("~/.pyliftover"), use_web=True, write_cache=True, use_gzip=None, show_progress=False):
+    def __init__(
+            self, from_db, to_db=None, search_dir='.',
+            cache_dir=os.path.expanduser("~/.pyliftover"),
+            use_web=True, write_cache=True, use_gzip=None):
+
         '''
         LiftOver can be initialized in multiple ways.
          * By providing a filename as a single argument: LiftOver("hg17ToHg18.over.chain.gz")
@@ -60,7 +64,7 @@ class LiftOver:
         else:
             # From- and To- db names were provided.
             f = open_liftover_chain_file(from_db=from_db, to_db=to_db, search_dir=search_dir, cache_dir=cache_dir, use_web=use_web, write_cache=write_cache)
-        self.chain_file = LiftOverChainFile(f, show_progress=show_progress)
+        self.chain_file = LiftOverChainFile(f)
         f.close()
         
     def convert_coordinate(self, chromosome, position, strand='+'):

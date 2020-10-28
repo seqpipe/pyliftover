@@ -42,7 +42,13 @@ def load_chain(data):
     f = StringIO(data)
     f.readline()
     header = f.readline()
-    return LiftOverChain(header, f)
+    header = header.decode("ascii")
+    header = header.strip()
+
+    chain =  LiftOverChain(header)
+    chain.load_blocks(f)
+
+    return chain
     
 def test_liftover_chain():
     '''
@@ -75,11 +81,11 @@ def test_liftover_chain_file():
     index = LiftOverChainFile._index_chains(chains)
     assert len(index) == 1
     assert len(index['chrY']) == 9+4
-    assert len(index['chrY'].query(25985406)) == 2
-    assert len(index['chrY'].query(25985403)) == 1
-    assert len(index['chrY'].query(25985402)) == 0
-    assert len(index['chrY'].query(25985405)) == 1
-    assert index['chrY'].query(25985405)[0][2][-1] == chains[0]
+    assert len(index['chrY'].at(25985406)) == 2
+    assert len(index['chrY'].at(25985403)) == 1
+    assert len(index['chrY'].at(25985402)) == 0
+    assert len(index['chrY'].at(25985405)) == 1
+    assert sorted(index['chrY'].at(25985405))[0][2][-1] == chains[0]
     cf = LiftOverChainFile(StringIO(data))
     assert len(cf.query('chrY', 25985406)) == 2
     assert len(cf.query('chrY', 25985403)) == 1

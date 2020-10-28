@@ -13,8 +13,9 @@ import gzip
 import urllib
 import shutil
 import sys
+import logging
 
-from .intervaltree import IntervalTree
+from intervaltree import IntervalTree
 
 if sys.version_info >= (3, 0):
     import urllib.request
@@ -30,6 +31,10 @@ if sys.version_info < (3, 3):
     urlretrieve = _urlopener.retrieve
 else:
     urlretrieve = urllib.request.urlretrieve
+
+
+logger = logging.getLogger(__name__)
+
 
 def open_liftover_chain_file(from_db, to_db, search_dir='.', cache_dir=os.path.expanduser("~/.pyliftover"), use_web=True, write_cache=True):
     '''
@@ -96,10 +101,11 @@ class LiftOverChainFile:
     '''
     The class, which loads and indexes USCS's .over.chain files.
     
-    Specification of the chain format can be found here: http://genome.ucsc.edu/goldenPath/help/chain.html
+    Specification of the chain format can be found here: 
+    http://genome.ucsc.edu/goldenPath/help/chain.html
     '''
     
-    def __init__(self, f, show_progress=False):
+    def __init__(self, f):
         '''
         Reads chain data from the file and initializes an interval index.
         f must be a file object open for reading.
@@ -108,113 +114,127 @@ class LiftOverChainFile:
         If show_progress == True, a progress bar is shown in the console.
         Requires tqdm to be installed.
         '''
-        self.chains = self._load_chains(f, show_progress)
-        self.chain_index = self._index_chains(self.chains, show_progress)
+        self.chains = self._load_chains(f)
+        self.chain_index = self._index_chains(self.chains)
         
     @staticmethod
-    def _load_chains(f, show_progress=False):
+    def _load_chains(infile):
         '''
         Loads all LiftOverChain objects from a file into an array. Returns the result.
         '''
         chains = []
-        if show_progress:
-            from tqdm import tqdm
-            pbar = tqdm(total = float('inf'), desc="Reading file", unit=" chains")
         while True:
-            line = f.readline()
+            line = infile.readline()
             if not line:
                 break
-            if line.startswith(b'#') or line.startswith(b'\n') or line.startswith(b'\r'):
+            line = line.decode("ascii")
+            line = line.strip()
+
+            if line.startswith('#'):
                 continue
-            if line.startswith(b'chain'):
+            if line.startswith('chain'):
                 # Read chain
-                chains.append(LiftOverChain(line, f))
-                if show_progress:
-                    pbar.update(1)
+                chain = LiftOverChain(line)
+                chain.load_blocks(infile)
+        
+                chains.append(chain)
                 continue
         return chains
 
     @staticmethod
-    def _index_chains(chains, show_progress=False):
+    def _index_chains(chains):
         '''
         Given a list of LiftOverChain objects, creates a
          dict: source_name --> 
             IntervalTree: <source_from, source_to> -->
                 (target_from, target_to, chain)
         Returns the resulting dict.
-        Throws an exception on any errors or inconsistencies among chains (e.g. different sizes specified for the same chromosome in various chains).
+        Throws an exception on any errors or inconsistencies among chains (e.g.
+        different sizes specified for the same chromosome in various 
+        chains).
         '''
         chain_index = {}
         source_size = {}
         target_size = {}
-        if show_progress:
-            from tqdm import tqdm
-            chains = tqdm(chains, desc="Indexing", unit=" chains")
+
         for c in chains:
             # Verify that sizes of chromosomes are consistent over all chains
             source_size.setdefault(c.source_name, c.source_size)
             if source_size[c.source_name] != c.source_size:
-                raise Exception("Chains have inconsistent specification of source chromosome size for %s (%d vs %d)" % (c.source_name, source_size[c.source_name], c.source_size))
+                raise Exception(
+                    "Chains have inconsistent specification of source "
+                    "chromosome size for %s (%d vs %d)" % (
+                        c.source_name, source_size[c.source_name],
+                        c.source_size))
+
             target_size.setdefault(c.target_name, c.target_size)
             if target_size[c.target_name] != c.target_size:
-                raise Exception("Chains have inconsistent specification of target chromosome size for %s (%d vs %d)" % (c.target_name, target_size[c.target_name], c.target_size))
-            chain_index.setdefault(c.source_name, IntervalTree(0, c.source_size))
+                raise Exception(
+                    "Chains have inconsistent specification of target "
+                    "chromosome size for %s (%d vs %d)" % (
+                        c.target_name, target_size[c.target_name],
+                        c.target_size))
+            chain_index.setdefault(c.source_name, IntervalTree())
             # Register all blocks from the chain in the corresponding interval tree
             tree = chain_index[c.source_name]
             for (sfrom, sto, tfrom) in c.blocks:
-                tree.add_interval(sfrom, sto, (tfrom, c))
+                tree.addi(sfrom, sto, (tfrom, c))
 
         # Sort all interval trees
-        for k in chain_index:
-            chain_index[k].sort()
+        # for k in chain_index:
+        #     chain_index[k].sort()
         return chain_index
 
     def query(self, chromosome, position):
         '''
-        Given a chromosome and position, returns all matching records from the chain index.
+        Given a chromosome and position, returns all matching records from the 
+        chain index.
         Each record is an interval (source_from, source_to, data)
-        where data = (target_from, target_to, chain). Note that depending on chain.target_strand, the target values may need to be reversed (e.g. pos --> chain.target_size - pos).
+        where data = (target_from, target_to, chain). Note that depending on 
+        chain.target_strand, the target values may need to be reversed 
+        (e.g. pos --> chain.target_size - pos).
         
         If chromosome is not found in the index, None is returned.
         '''
-        # A somewhat-ugly hack to allow both 'bytes' and 'str' objects to be used as
-        # chromosome names in Python 3. As we store chromosome names as strings,
-        # we'll transparently translate the query to a string too.
-        if type(chromosome).__name__ == 'bytes':
-            chromosome = chromosome.decode('ascii')
         if chromosome not in self.chain_index:
             return None
         else:
-            return self.chain_index[chromosome].query(position)
+            return sorted(self.chain_index[chromosome].at(position))
 
 
 class LiftOverChain:
     '''
     Represents a single chain from an .over.chain file.
-    A chain basically maps a set of intervals from "source" coordinates to corresponding coordinates in "target" coordinates.
-    The "source" and "target" are somehow referred to in the specs (http://genome.ucsc.edu/goldenPath/help/chain.html)
+    A chain basically maps a set of intervals from "source" coordinates to 
+    corresponding coordinates in "target" coordinates.
+    The "source" and "target" are somehow referred to in the specs 
+    (http://genome.ucsc.edu/goldenPath/help/chain.html)
     as "target" and "query" respectively.
     '''
-    __slots__ = ['score', 'source_name', 'source_size', 'source_start', 'source_end',
-	             'target_name', 'target_size', 'target_strand', 'target_start', 'target_end', 'id', 'blocks']
 
-    def __init__(self, header, f):
+    def __init__(self, header):
         '''
         Reads the chain from a stream given the first line and a file opened at all remaining lines.
         On error throws an exception.
         '''
-        if sys.version_info >= (3, 0):
-            header = header.decode('ascii') # In Python 2, work with usual strings.
+        self.header = header
+
         fields = header.split()
+
         if fields[0] != 'chain' and len(fields) not in [12, 13]:
             raise Exception("Invalid chain format. (%s)" % header)
-        # chain 4900 chrY 58368225 + 25985403 25985638 chr5 151006098 - 43257292 43257528 1
+        # chain 4900 chrY 58368225 + 25985403 25985638 
+        # chr5 151006098 - 43257292 43257528 1
         self.score = int(fields[1])        # Alignment score
         self.source_name = fields[2]       # E.g. chrY
         self.source_size = int(fields[3])  # Full length of the chromosome
         source_strand = fields[4]          # Must be +
         if source_strand != '+':
-            raise Exception("Source strand in an .over.chain file must be +. (%s)" % header)
+            print(fields)
+            print("strand:", source_strand, type(source_strand))
+
+            raise Exception(
+                f"Source strand in an .over.chain file must be +. ({header})")
         self.source_start = int(fields[5]) # Start of source region
         self.source_end = int(fields[6])   # End of source region
         self.target_name = fields[7]       # E.g. chr5
@@ -226,19 +246,27 @@ class LiftOverChain:
         self.target_end = int(fields[11])
         self.id = None if len(fields) == 12 else fields[12].strip()
         
+        self.blocks = []
+    
+    def load_blocks(self, infile):
         # Now read the alignment chain from the file and store it as a list (source_from, source_to) -> (target_from, target_to)
         sfrom, tfrom = self.source_start, self.target_start
-        self.blocks = []
-        fields = f.readline().decode('ascii').split()
+
+        fields = infile.readline().decode('ascii').split()
         while len(fields) == 3:
             size, sgap, tgap = int(fields[0]), int(fields[1]), int(fields[2])
             self.blocks.append((sfrom, sfrom+size, tfrom))
             sfrom += size + sgap
             tfrom += size + tgap
-            fields = f.readline().split()
+            fields = infile.readline().decode("ascii").split()
         if len(fields) != 1:
-            raise Exception("Expecting one number on the last line of alignments block. (%s)" % header)
+            raise Exception(
+                "Expecting one number on the last line of alignments "
+                "block. (%s)" % self.header)
         size = int(fields[0])
         self.blocks.append((sfrom, sfrom+size, tfrom))
-        if (sfrom + size) != self.source_end  or (tfrom + size) != self.target_end:
-            raise Exception("Alignment blocks do not match specified block sizes. (%s)" % header)
+        if (sfrom + size) != self.source_end  or \
+                (tfrom + size) != self.target_end:
+            raise Exception(
+                "Alignment blocks do not match specified block "
+                "sizes. (%s)" % self.header)
