@@ -36,22 +36,30 @@ else:
 logger = logging.getLogger(__name__)
 
 
-def open_liftover_chain_file(from_db, to_db, search_dir='.', cache_dir=os.path.expanduser("~/.pyliftover"), use_web=True, write_cache=True):
+def open_liftover_chain_file(
+        from_db, to_db, search_dir='.',
+        cache_dir=os.path.expanduser("~/.pyliftover"),
+        use_web=True, write_cache=True):
+
     '''
     A "smart" way of obtaining liftover chain files.
     By default acts as follows:
-     1. If the file ``<from_db>To<to_db>.over.chain.gz`` exists in <search_dir>,
-        opens it for reading via gzip.open.
+     1. If the file ``<from_db>To<to_db>.over.chain.gz`` exists in 
+        <search_dir>, opens it for reading via gzip.open.
      2. Otherwise, if the file ``<from_db>To<to_db>.over.chain`` exists
         in the <search_dir> opens it (as uncompressed file).
         Steps 1 and 2 may be disabled if search_dir is set to None.
-     3. Otherwise, checks whether ``<cache_dir>/<from_db>To<to_db>.over.chain.gz`` exists.
+     3. Otherwise, checks whether 
+        ``<cache_dir>/<from_db>To<to_db>.over.chain.gz`` exists.
         This step may be disabled by specifying cache_dir = None.
      4. If file still not found attempts to download the file from the URL
-        'http://hgdownload.cse.ucsc.edu/goldenPath/<from_db>/liftOver/<from_db>To<to_db>.over.chain.gz'
-        to a temporary location. This step may be disabled by specifying use_web=False. In this case the operation fails and 
-        the function returns None.
-     5. At this point, if write_cache=True and cache_dir is not None and writable, the file is copied to cache_dir and opened from there.
+        'http://hgdownload.cse.ucsc.edu/goldenPath/<from_db>/liftOver/
+        <from_db>To<to_db>.over.chain.gz'
+        to a temporary location. This step may be disabled by specifying
+        use_web=False. In this case the operation fails and  the function
+        returns None.
+     5. At this point, if write_cache=True and cache_dir is not None and
+        writable, the file is copied to cache_dir and opened from there.
         Otherwise it is opened from the temporary location.
         
     In case of errors (e.g. URL cannot be opened), None is returned.
@@ -157,32 +165,38 @@ class LiftOverChainFile:
         source_size = {}
         target_size = {}
 
-        for c in chains:
-            # Verify that sizes of chromosomes are consistent over all chains
-            source_size.setdefault(c.source_name, c.source_size)
-            if source_size[c.source_name] != c.source_size:
-                raise Exception(
-                    "Chains have inconsistent specification of source "
-                    "chromosome size for %s (%d vs %d)" % (
-                        c.source_name, source_size[c.source_name],
-                        c.source_size))
+        for chain in chains:
+            # Verify that source sizes of chromosomes are consistent 
+            # over all chains
+            if chain.source_name in source_size:
+                if source_size[chain.source_name] != chain.source_size:
+                    raise Exception(
+                        "Chains have inconsistent specification of source "
+                        "chromosome size for %s (%d vs %d)" % (
+                            chain.source_name,
+                            source_size[chain.source_name],
+                            chain.source_size))
+            source_size[chain.source_name] = chain.source_size
 
-            target_size.setdefault(c.target_name, c.target_size)
-            if target_size[c.target_name] != c.target_size:
-                raise Exception(
-                    "Chains have inconsistent specification of target "
-                    "chromosome size for %s (%d vs %d)" % (
-                        c.target_name, target_size[c.target_name],
-                        c.target_size))
-            chain_index.setdefault(c.source_name, IntervalTree())
-            # Register all blocks from the chain in the corresponding interval tree
-            tree = chain_index[c.source_name]
-            for (sfrom, sto, tfrom) in c.blocks:
-                tree.addi(sfrom, sto, (tfrom, c))
+            # Verify that target sizes of chromosomes are consistent 
+            # over all chains
+            if chain.target_name in target_size:
+                if target_size[chain.target_name] != chain.target_size:
+                    raise Exception(
+                        "Chains have inconsistent specification of target "
+                        "chromosome size for %s (%d vs %d)" % (
+                            chain.target_name,
+                            target_size[chain.target_name],
+                            chain.target_size))
+            target_size[chain.target_name] = chain.target_size
 
-        # Sort all interval trees
-        # for k in chain_index:
-        #     chain_index[k].sort()
+            # Register all blocks from the chain in the corresponding 
+            # interval tree
+            chain_index.setdefault(chain.source_name, IntervalTree())
+            tree = chain_index[chain.source_name]
+            for (sfrom, sto, tfrom) in chain.blocks:
+                tree.addi(sfrom, sto, (tfrom, chain))
+
         return chain_index
 
     def query(self, chromosome, position):

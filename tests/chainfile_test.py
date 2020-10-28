@@ -103,7 +103,10 @@ def test_liftover_chain_file():
     assert len(index) >= 22
 
 def test_issue_1():
-    testdata_file = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'data', 'mds42.to.mg1655.liftOver')
+    testdata_file = os.path.join(
+        os.path.dirname(os.path.realpath(__file__)),
+        'data', 'mds42.to.mg1655.liftOver')
+
     with open(testdata_file, 'rb') as f:
         locf = LiftOverChainFile(f)
         assert len(locf.chains) == 1
